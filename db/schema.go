@@ -56,13 +56,15 @@ type Stream struct {
 	Title       *string
 	StartedAt   time.Time
 	EndedAt     *time.Time
-	QOTDId      *int
+	QOTDId      *int64
 	FirstUserId *int
 }
 
 type Question struct {
-	ID   int
-	Text string
+	ID        int64  `json:"id"`
+	Text      string `json:"text"`
+	Disabled  bool   `json:"disabled"`
+	SkipCount int    `json:"skipCount"`
 }
 
 const userSeed = `

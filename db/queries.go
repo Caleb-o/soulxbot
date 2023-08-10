@@ -109,15 +109,34 @@ VALUES (?)
 `
 
 const FIND_QUESTION_BY_ID string = `
-SELECT id, text
+SELECT id, text, disabled, skipCount
 FROM question
 WHERE id=?
 `
 
+const FIND_QUESTION_BY_TEXT string = `
+SELECT id, text, disabled, skipCount
+FROM question
+WHERE text=?
+`
+
 const FIND_RANDOM_QUESTION string = `
-SELECT id, text
+SELECT id, text, disabled, skipCount
 FROM question
 WHERE NOT EXISTS (SELECT qotdId FROM stream WHERE qotdId=question.id AND userId=?)
+    AND disabled = false
 ORDER BY RANDOM()
 LIMIT 1
+`
+
+const DISABLE_QUESTION string = `
+UPDATE question
+SET disabled = true
+WHERE id=?
+`
+
+const INCREMENT_QUESTION_SKIP string = `
+UPDATE question
+SET skipCount = skipCount + 1
+WHERE id=?
 `
