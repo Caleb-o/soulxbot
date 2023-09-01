@@ -57,24 +57,28 @@ func main() {
 	httpApi := api.New(apiConfig, AppCtx.DataStore, AppCtx.TwitchAPI)
 	go httpApi.InitAPIAndListen()
 
+	// I don't think I've ever seen this used.
 	AppCtx.ClientIRC.OnUserNoticeMessage(func(message twitchirc.UserNoticeMessage) {
 		fmt.Printf("Notice: %s\n", message.Message)
 	})
 
 	AppCtx.ClientIRC.OnPrivateMessage(func(message twitchirc.PrivateMessage) {
 		messageUser := handleMessageUser(&message)
-		streamUser, ok := AppCtx.DataStore.FindUserByUsername(strings.ToLower(message.Channel))
-		if !ok {
+		streamUser, err := AppCtx.DataStore.FindStreamUserByUserName(strings.ToLower(message.Channel))
+		if err != nil {
 			log.Printf("Unable to find stream user for twitch channel %s", message.Channel)
 		}
-		stream := AppCtx.DataStore.FindCurrentStream(streamUser.ID)
+		stream := AppCtx.DataStore.FindCurrentStream(streamUser.UserId)
 
-		if isCommand(message.Message) {
+		if !streamUser.BotDisabled && isCommand(message.Message) {
 			command, input := parseCommand(message.Message)
 
 			switch command {
 			case "first":
-				if stream != nil && stream.FirstUserId != nil {
+				if !isFirstEnabled(streamUser) {
+					return
+				}
+				if stream != nil && stream.FirstUserId != nil && streamUser != nil && streamUser.FirstEnabled {
 					if *stream.FirstUserId != messageUser.ID {
 						firstUser, _ := AppCtx.DataStore.FindUserByID(*stream.FirstUserId)
 						AppCtx.ClientIRC.Say(message.Channel, fmt.Sprintf("Sorry %s, you are not first. %s was!", message.User.DisplayName, firstUser.DisplayName))
@@ -83,19 +87,25 @@ func main() {
 					}
 				}
 			case "firstcount":
-				timesFirst, err := AppCtx.DataStore.FindUserTimesFirst(stream.UserId, messageUser.ID)
+				if !isFirstEnabled(streamUser) {
+					return
+				}
+				timesFirst, err := AppCtx.DataStore.FindUserTimesFirst(streamUser.User.ID, messageUser.ID)
 				if err != nil {
 					log.Println(err)
 					return
 				}
 				AppCtx.ClientIRC.Say(message.Channel, fmt.Sprintf("%s, you have been first %d times", messageUser.DisplayName, timesFirst))
 			case "firstleaders":
-				leaders, _ := AppCtx.DataStore.FindFirstLeaders(stream.UserId, 3)
+				if !isFirstEnabled(streamUser) {
+					return
+				}
+				leaders, _ := AppCtx.DataStore.FindFirstLeaders(streamUser.User.ID, 3)
 				for i, v := range leaders {
 					AppCtx.ClientIRC.Say(message.Channel, fmt.Sprintf("%d. %s - %d", i+1, v.User.DisplayName, v.TimesFirst))
 				}
 			case "firstgive":
-				if stream != nil && stream.UserId == messageUser.ID && len(input) > 0 {
+				if stream != nil && stream.UserId == messageUser.ID && len(input) > 0 && isFirstEnabled(streamUser) {
 					targetUser, found := AppCtx.DataStore.FindUserByUsername(input)
 					if found {
 						AppCtx.DataStore.UpdateFirstUser(stream.ID, targetUser.ID)
@@ -105,14 +115,16 @@ func main() {
 					}
 				}
 			case "qotd":
-				questionOfTheDay(stream, &message)
+				if stream != nil && streamUser != nil && streamUser.QotdEnabled {
+					questionOfTheDay(stream, &message)
+				}
 			case "skipqotd":
-				if stream != nil && stream.UserId == messageUser.ID {
-					if stream.QOTDId != nil {
-						AppCtx.DataStore.IncrementQuestionSkip(stream.QOTDId)
+				if stream != nil && stream.UserId == messageUser.ID && stream.QOTDId != nil && streamUser != nil && streamUser.QotdEnabled {
+					if skipCount, _ := AppCtx.DataStore.IncrementQuestionSkip(*stream.QOTDId); skipCount > 2 {
+						AppCtx.DataStore.DisableQuestion(*stream.QOTDId)
 					}
 					AppCtx.DataStore.UpdateStreamQuestion(stream.ID, nil)
-					AppCtx.ClientIRC.Say(message.Channel, fmt.Sprintf("Question of the day skipped"))
+					AppCtx.ClientIRC.Say(message.Channel, fmt.Sprintf("Question of the day skipped, enter !qotd to get a new question"))
 				}
 			case "printall":
 				if isSouLxBurN(streamUser.Username) {
@@ -168,6 +180,10 @@ func main() {
 	}
 }
 
+func isFirstEnabled(streamUser *db.StreamUser) bool {
+	return streamUser != nil && streamUser.FirstEnabled
+}
+
 func handleMessageUser(message *twitchirc.PrivateMessage) *db.User {
 	var user *db.User
 	messageUserId, err := strconv.Atoi(message.User.ID)
@@ -175,11 +191,22 @@ func handleMessageUser(message *twitchirc.PrivateMessage) *db.User {
 		log.Printf("Failed to convert twitch user id=%s to integer", message.User.ID)
 		return nil
 	}
-	user, ok := AppCtx.DataStore.FindUserByUsername(message.User.Name)
+
+	user, ok := AppCtx.DataStore.FindUserByID(messageUserId)
 	if !ok {
 		user = AppCtx.DataStore.InsertUser(messageUserId, message.User.Name, message.User.DisplayName)
 		log.Printf("New User Found!: %d, %s, %s", user.ID, user.Username, user.DisplayName)
 	}
+
+	if user.Username != message.User.Name {
+		if err := AppCtx.DataStore.UpdateUserName(user.ID, message.User.Name, message.User.DisplayName); err != nil {
+			log.Printf("Failed to update userId=%d, to new username=%s: %v", user.ID, message.User.Name, err)
+			return user
+		}
+		log.Printf("Updated Username Found! %d, %s to %s", user.ID, user.Username, message.User.Name)
+		user, _ = AppCtx.DataStore.FindUserByID(user.ID)
+	}
+
 	return user
 }
 

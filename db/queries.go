@@ -5,6 +5,12 @@ INSERT INTO user (id, username, displayName)
 VALUES (?, ?, ?)
 `
 
+const UPDATE_USERNAME string = `
+UPDATE user
+SET username=?, displayName=?
+WHERE id=?
+`
+
 const FIND_ALL_USERS string = `
 SELECT id, username, displayName
 FROM user
@@ -139,4 +145,28 @@ const INCREMENT_QUESTION_SKIP string = `
 UPDATE question
 SET skipCount = skipCount + 1
 WHERE id=?
+`
+
+const CREATE_STREAM_CONFIG string = `
+INSERT INTO stream_config (
+    userId,
+    botDisabled,
+    firstEnabled,
+    firstEpoch,
+    qotdEnabled,
+    qotdEpoch,
+    dateUpdated)
+VALUES(?,?,?,?,?,?,?)
+`
+
+const FIND_STREAM_USER_BY_USERID string = `
+SELECT u.id, u.username, u.displayName, sc.id, sc.userId, sc.botDisabled, sc.firstEnabled, sc.firstEpoch, sc.qotdEnabled, sc.qotdEpoch, sc.dateUpdated
+FROM user u, stream_config sc
+WHERE u.id = sc.userId AND userId=?
+`
+
+const FIND_STREAM_USER_BY_USERNAME string = `
+SELECT u.id, u.username, u.displayName, sc.id, sc.userId, sc.botDisabled, sc.firstEnabled, sc.firstEpoch, sc.qotdEnabled, sc.qotdEpoch, sc.dateUpdated
+FROM user u, stream_config sc
+WHERE u.id = sc.userId AND u.username=?
 `
